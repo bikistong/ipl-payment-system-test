@@ -1953,6 +1953,236 @@ function AdminLaporan({ state }) {
 }
 
 
+// ─── PUBLIC: LAPORAN KAS (tanpa login) ───────────────────────────────────────
+function PublicKas({ state }) {
+  const { kas, kasRingkasan, periode, tagihan, pembayaran, warga, deposit, config } = state;
+  const tarif = Number(config.nominal_ipl) || 40000;
+
+  // Saldo deposit total
+  const totalDeposit = (deposit || []).reduce((s, d) =>
+    d.tipe === "MASUK" ? s + d.nominal : s - d.nominal, 0);
+  const saldoReal = (kasRingkasan.saldo || 0) - totalDeposit;
+
+  // Status warga per periode aktif
+  const periodeAktif = periode.find(p => p.status === "AKTIF");
+  const thisMonth    = periodeAktif?.bulan || "";
+  const tagihanAktif = tagihan.filter(t => t.idPeriode === periodeAktif?.id);
+  const sudahLunas   = tagihanAktif.filter(t => t.statusBayar === "LUNAS").length;
+  const belumBayar   = tagihanAktif.filter(t => t.statusBayar === "PENDING").length;
+  const tunggakan    = tagihan.filter(t => t.statusBayar === "TUNGGAK").length;
+
+  // Pengeluaran per kategori
+  const pengeluaran     = kas.filter(k => k.tipe === "KELUAR");
+  const kategoriSummary = {};
+  pengeluaran.forEach(k => {
+    if (!kategoriSummary[k.kategori]) kategoriSummary[k.kategori] = 0;
+    kategoriSummary[k.kategori] += k.nominal;
+  });
+
+  const KATEGORI_ICON = { IPL:"🏘", Kebersihan:"🌿", Peralatan:"🔧", Perbaikan:"🔨", Administrasi:"📋", Lainnya:"📦" };
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      {/* Header */}
+      <div className="bg-gradient-to-br from-teal-600 to-cyan-700 text-white">
+        <div className="max-w-2xl mx-auto px-4 py-8 text-center">
+          <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-4">🏘</div>
+          <h1 className="text-2xl font-bold">{config.nama_perumahan || "Mandalika Residence"}</h1>
+          <p className="text-teal-100 text-sm mt-1">Laporan Kas & Keuangan — Publik</p>
+          <p className="text-teal-200 text-xs mt-1">Diperbarui: {new Date().toLocaleDateString("id-ID", { day:"2-digit", month:"long", year:"numeric" })}</p>
+        </div>
+      </div>
+
+      <div className="max-w-2xl mx-auto px-4 py-6 space-y-5">
+
+        {/* Saldo Kas */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="bg-teal-50 border-b border-teal-100 px-5 py-3">
+            <h2 className="font-bold text-teal-800">💰 Saldo Kas</h2>
+          </div>
+          <div className="p-5 grid grid-cols-3 gap-4 text-center">
+            <div>
+              <p className="text-xs text-slate-400 uppercase font-semibold mb-1">Total Masuk</p>
+              <p className="text-lg font-bold text-emerald-600">{fmt(kasRingkasan.masuk || 0)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 uppercase font-semibold mb-1">Total Keluar</p>
+              <p className="text-lg font-bold text-rose-600">{fmt(kasRingkasan.keluar || 0)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 uppercase font-semibold mb-1">Saldo Real</p>
+              <p className="text-lg font-bold text-teal-700">{fmt(saldoReal)}</p>
+            </div>
+          </div>
+          {totalDeposit > 0 && (
+            <div className="px-5 pb-4">
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-700 text-center">
+                💎 Termasuk deposit warga <strong>{fmt(totalDeposit)}</strong> yang belum dipakai
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Progress IPL bulan ini */}
+        {periodeAktif && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="bg-emerald-50 border-b border-emerald-100 px-5 py-3">
+              <h2 className="font-bold text-emerald-800">📊 Koleksi IPL — {thisMonth}</h2>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="grid grid-cols-3 gap-3 text-center">
+                <div className="bg-emerald-50 rounded-xl p-3">
+                  <p className="text-2xl font-bold text-emerald-600">{sudahLunas}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Lunas</p>
+                </div>
+                <div className="bg-amber-50 rounded-xl p-3">
+                  <p className="text-2xl font-bold text-amber-600">{belumBayar}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Belum Bayar</p>
+                </div>
+                <div className="bg-rose-50 rounded-xl p-3">
+                  <p className="text-2xl font-bold text-rose-600">{tunggakan}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Tunggakan</p>
+                </div>
+              </div>
+              {tagihanAktif.length > 0 && (
+                <>
+                  <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
+                    <div className="bg-gradient-to-r from-emerald-500 to-teal-400 h-full rounded-full transition-all"
+                      style={{width:`${Math.round((sudahLunas/tagihanAktif.length)*100)}%`}} />
+                  </div>
+                  <div className="flex justify-between text-xs text-slate-400">
+                    <span>{fmt(sudahLunas * tarif)} terkumpul</span>
+                    <span>{Math.round((sudahLunas/tagihanAktif.length)*100)}% dari target {fmt(tagihanAktif.length * tarif)}</span>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Siapa yang belum bayar */}
+        {(belumBayar > 0 || tunggakan > 0) && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="bg-rose-50 border-b border-rose-100 px-5 py-3">
+              <h2 className="font-bold text-rose-800">⏳ Belum Bayar & Tunggakan</h2>
+            </div>
+            <div className="divide-y divide-slate-50 max-h-64 overflow-y-auto">
+              {[...tagihanAktif.filter(t => t.statusBayar !== "LUNAS"),
+                ...tagihan.filter(t => t.statusBayar === "TUNGGAK" && t.idPeriode !== periodeAktif?.id)
+              ].map(t => {
+                const w = warga.find(w => w.id === t.wargaId);
+                return (
+                  <div key={t.id} className="px-5 py-3 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-slate-700">{w?.nama || "—"}</p>
+                      <p className="text-xs text-slate-400">{w?.blok}{w?.nomor} · {t.bulan}</p>
+                    </div>
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                      t.statusBayar === "TUNGGAK"
+                        ? "bg-red-100 text-red-700"
+                        : "bg-amber-100 text-amber-700"
+                    }`}>
+                      {t.statusBayar === "TUNGGAK" ? "⚠️ Tunggak" : "⏳ Belum"}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Riwayat periode */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="bg-slate-50 border-b border-slate-100 px-5 py-3">
+            <h2 className="font-bold text-slate-700">📅 Riwayat Periode</h2>
+          </div>
+          <div className="divide-y divide-slate-50">
+            {periode.length === 0
+              ? <p className="text-center py-6 text-slate-400 text-sm">Belum ada data</p>
+              : [...periode].reverse().map(p => {
+                const tP     = tagihan.filter(t => t.idPeriode === p.id);
+                const lunas  = tP.filter(t => t.statusBayar === "LUNAS").length;
+                const tnggk  = tP.filter(t => t.statusBayar === "TUNGGAK").length;
+                return (
+                  <div key={p.id} className="px-5 py-4 flex items-center gap-3">
+                    <div className={`w-2 h-10 rounded-full flex-shrink-0 ${p.status === "AKTIF" ? "bg-emerald-500" : "bg-slate-300"}`} />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="font-semibold text-slate-700 text-sm">{p.bulan}</p>
+                        <span className={`text-xs px-1.5 py-0.5 rounded font-semibold ${p.status === "AKTIF" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                          {p.status}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        ✅ {lunas} lunas{tnggk > 0 ? ` · ⚠️ ${tnggk} tunggak` : ""}
+                      </p>
+                    </div>
+                    <p className="font-bold text-teal-600 text-sm">{fmt(p.totalTerkumpul || 0)}</p>
+                  </div>
+                );
+              })
+            }
+          </div>
+        </div>
+
+        {/* Pengeluaran per kategori */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="bg-slate-50 border-b border-slate-100 px-5 py-3">
+            <h2 className="font-bold text-slate-700">📤 Pengeluaran per Kategori</h2>
+          </div>
+          <div className="p-5 space-y-3">
+            {Object.entries(kategoriSummary).sort((a,b) => b[1]-a[1]).map(([kat, total]) => (
+              <div key={kat} className="flex items-center gap-3">
+                <span className="text-xl">{KATEGORI_ICON[kat] || "📦"}</span>
+                <div className="flex-1">
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="font-medium text-slate-700">{kat}</span>
+                    <span className="font-bold text-slate-700">{fmt(total)}</span>
+                  </div>
+                  <div className="w-full bg-slate-100 rounded-full h-1.5">
+                    <div className="bg-rose-400 h-full rounded-full"
+                      style={{width:`${Math.round((total/(kasRingkasan.keluar||1))*100)}%`}} />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Riwayat transaksi kas */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="bg-slate-50 border-b border-slate-100 px-5 py-3">
+            <h2 className="font-bold text-slate-700">📋 Riwayat Transaksi</h2>
+          </div>
+          <div className="divide-y divide-slate-50">
+            {kas.length === 0
+              ? <p className="text-center py-6 text-slate-400 text-sm">Belum ada transaksi</p>
+              : [...kas].sort((a,b) => new Date(b.tanggal)-new Date(a.tanggal)).map(k => (
+                <div key={k.id} className="px-5 py-3.5 flex items-center gap-3">
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm flex-shrink-0 ${k.tipe==="MASUK"?"bg-emerald-100":"bg-rose-100"}`}>
+                    {KATEGORI_ICON[k.kategori] || "📦"}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-slate-700 truncate">{k.keterangan}</p>
+                    <p className="text-xs text-slate-400">{fmtDate(k.tanggal)} · {k.kategori}</p>
+                  </div>
+                  <p className={`text-sm font-bold flex-shrink-0 ${k.tipe==="MASUK"?"text-emerald-600":"text-rose-500"}`}>
+                    {k.tipe==="MASUK"?"+":"-"}{fmt(k.nominal)}
+                  </p>
+                </div>
+              ))
+            }
+          </div>
+        </div>
+
+        <p className="text-center text-xs text-slate-400 pb-4">
+          {config.nama_perumahan} · Data diperbarui real-time
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ─── USER: SALDO DEPOSIT ──────────────────────────────────────────────────────
 function UserDeposit({ state }) {
   const { currentWarga, deposit } = state;
@@ -2922,6 +3152,10 @@ export default function App() {
 
   if (state.loading) return <LoadingScreen />;
   if (state.error)   return <ErrorScreen error={state.error} onRetry={loadData} />;
+
+  // Halaman publik tanpa login
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get("page") === "kas") return <PublicKas state={state} />;
 
   // FIX: Tampilkan halaman admin login jika dipilih
   if (!state.session) {
