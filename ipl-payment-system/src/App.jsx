@@ -663,15 +663,21 @@ function AdminLoginPage({ state, dispatch, onBack }) {
 
 // ─── USER: DASHBOARD ──────────────────────────────────────────────────────────
 function UserDashboard({ state }) {
-  const { currentWarga, pembayaran, tagihan } = state;
+  const { currentWarga, pembayaran, tagihan, deposit } = state;
   if (!currentWarga) return null;
 
   const myPembayaran = pembayaran.filter(p => p.wargaId === currentWarga.id);
   const myTagihan    = tagihan.filter(t => t.wargaId === currentWarga.id);
   const lunasIds     = myPembayaran.filter(p => p.status === "APPROVED").map(p => p.tagihanId);
   const belumLunas   = myTagihan.filter(t => !lunasIds.includes(t.id));
+  const tunggakan    = belumLunas.filter(t => t.statusBayar === "TUNGGAK");
+  const pending      = belumLunas.filter(t => t.statusBayar !== "TUNGGAK");
   const totalTagihan = belumLunas.reduce((s, t) => s + t.nominal, 0);
   const totalBayar   = myPembayaran.filter(p => p.status === "APPROVED").reduce((s, p) => s + p.nominal, 0);
+
+  // Saldo deposit warga ini
+  const myDeposit    = (deposit || []).filter(d => d.wargaId === currentWarga.id);
+  const saldoDeposit = myDeposit.reduce((s, d) => d.tipe === "MASUK" ? s + d.nominal : s - d.nominal, 0);
 
   return (
     <div className="space-y-6">
@@ -680,25 +686,59 @@ function UserDashboard({ state }) {
         <p className="text-slate-500 text-sm mt-1">Blok {currentWarga.blok}{currentWarga.nomor || ""}</p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <DashboardCard icon="📋" label="Tagihan Belum Lunas" value={belumLunas.length} sub={fmt(totalTagihan)} color="rose" />
-        <DashboardCard icon="✅" label="Total Sudah Dibayar" value={fmt(totalBayar)} color="emerald" />
-        <DashboardCard icon="⏳" label="Menunggu Persetujuan" value={myPembayaran.filter(p => p.status === "PENDING").length} color="amber" />
+      {/* Warning tunggakan */}
+      {tunggakan.length > 0 && (
+        <div className="bg-red-50 border-2 border-red-400 rounded-2xl p-4 flex items-start gap-3">
+          <span className="text-2xl">⚠️</span>
+          <div>
+            <p className="font-bold text-red-700">Kamu memiliki {tunggakan.length} tunggakan!</p>
+            <p className="text-xs text-red-500 mt-0.5">
+              Total tunggakan: <strong>{fmt(tunggakan.reduce((s,t) => s+t.nominal, 0))}</strong>.
+              Tunggakan akan diprioritaskan saat kamu bayar.
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <DashboardCard icon="📋" label="Belum Lunas"   value={belumLunas.length}  sub={fmt(totalTagihan)} color="rose"    />
+        <DashboardCard icon="✅" label="Total Dibayar" value={fmt(totalBayar)}                            color="emerald" />
+        <DashboardCard icon="⏳" label="Menunggu"      value={myPembayaran.filter(p => p.status === "PENDING").length} color="amber" />
+        {saldoDeposit > 0 && (
+          <DashboardCard icon="💎" label="Deposit"     value={fmt(saldoDeposit)}  sub="saldo titipan"     color="teal"    />
+        )}
       </div>
 
       {belumLunas.length > 0 && (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
           <h3 className="font-bold text-slate-700 mb-4">Tagihan Aktif</h3>
           <div className="space-y-3">
-            {belumLunas.map(t => (
+
+            {/* Tunggakan dulu (FIFO) */}
+            {tunggakan.map(t => (
+              <div key={t.id} className="flex items-center justify-between p-4 bg-red-50 rounded-xl border-2 border-red-400">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xs font-bold text-white bg-red-500 px-2 py-0.5 rounded-full">⚠️ TUNGGAK</span>
+                  </div>
+                  <p className="font-semibold text-slate-700">{t.keterangan || "Iuran IPL"} — {t.bulan}</p>
+                  <p className="text-xs text-red-500 mt-0.5">Sudah melewati jatuh tempo!</p>
+                </div>
+                <p className="font-bold text-red-600">{fmt(t.nominal)}</p>
+              </div>
+            ))}
+
+            {/* Tagihan bulan ini */}
+            {pending.map(t => (
               <div key={t.id} className="flex items-center justify-between p-4 bg-rose-50 rounded-xl border border-rose-200">
                 <div>
-                  <p className="font-semibold text-slate-700">{t.keterangan || "Iuran IPL"}</p>
+                  <p className="font-semibold text-slate-700">{t.keterangan || "Iuran IPL"} — {t.bulan}</p>
                   <p className="text-xs text-slate-500">Jatuh tempo: {fmtDate(t.jatuhTempo)}</p>
                 </div>
                 <p className="font-bold text-rose-600">{fmt(t.nominal)}</p>
               </div>
             ))}
+
           </div>
         </div>
       )}
