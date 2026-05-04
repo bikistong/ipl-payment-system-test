@@ -3,7 +3,7 @@ import { useState, useReducer, useRef, useEffect, useCallback } from "react";
 // ─────────────────────────────────────────────────────────────────────────────
 // 🔧 KONFIGURASI
 // ─────────────────────────────────────────────────────────────────────────────
-const APPSCRIPT_URL = "https://script.google.com/macros/s/AKfycby5T_7rIonpMwDt4dsq1rjjB9-vtKbeoDUpgWk2fVkTJRnUe-tBQh0nj-0FTMKdQnQ1/exec";
+const APPSCRIPT_URL = "https://script.google.com/macros/s/AKfycbwrH0W2YMm0FP9dZNaFOjC0eXb1IqC4JtmILuurp5Bb9UrN01hRZQ7q71G2ekLSIi1o/exec";
 
 // ─── API LAYER ────────────────────────────────────────────────────────────────
 const api = {
@@ -76,6 +76,20 @@ const api = {
       body: JSON.stringify({ action: "addKas", ...payload }),
     }).then(r => r.json()),
 
+  generateTagihan: (payload) =>
+    fetch(APPSCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ action: "generateTagihan", ...payload }),
+    }).then(r => r.json()),
+
+  tutupBuku: (payload) =>
+    fetch(APPSCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ action: "tutupBuku", ...payload }),
+    }).then(r => r.json()),
+
   loginAdmin: (payload) =>
     fetch(APPSCRIPT_URL, {
       method: "POST",
@@ -96,6 +110,8 @@ const initialState = {
   deposit: [],
   kas: [],
   kasRingkasan: { masuk: 0, keluar: 0, saldo: 0 },
+  periode: [],
+  periodeAktif: null,
   config: {},
   currentWarga: null,
   session: null,
@@ -131,6 +147,8 @@ function reducer(state, action) {
         deposit:      action.payload.deposit      || [],
         kas:          action.payload.kas          || [],
         kasRingkasan: action.payload.kasRingkasan || { masuk: 0, keluar: 0, saldo: 0 },
+        periode:      action.payload.periode      || [],
+        periodeAktif: action.payload.periodeAktif || null,
         config:       action.payload.config       || {},
         currentWarga: state.session || action.payload.warga?.[0] || null,
       };
@@ -147,6 +165,8 @@ function reducer(state, action) {
         deposit:      action.payload.deposit      || state.deposit,
         kas:          action.payload.kas          || state.kas,
         kasRingkasan: action.payload.kasRingkasan || state.kasRingkasan,
+        periode:      action.payload.periode      || state.periode,
+        periodeAktif: action.payload.periodeAktif || state.periodeAktif,
         config:       action.payload.config       || state.config,
       };
 
@@ -1940,6 +1960,270 @@ function UserDeposit({ state }) {
   );
 }
 
+// ─── ADMIN: PERIODE & TUTUP BUKU ─────────────────────────────────────────────
+function AdminPeriode({ state, dispatch, onRefresh }) {
+  const { periode, periodeAktif, tagihan, pembayaran, warga, config } = state;
+  const tarif = Number(config.nominal_ipl) || 40000;
+
+  const [modalGenerate, setModalGenerate] = useState(false);
+  const [modalTutup, setModalTutup]       = useState(false);
+  const [saving, setSaving]               = useState(false);
+  const [formGenerate, setFormGenerate]   = useState({
+    bulan: "", jatuhTempo: ""
+  });
+  const [previewTutup, setPreviewTutup]   = useState(null);
+
+  // Hitung preview tutup buku
+  const hitungPreviewTutup = () => {
+    if (!periodeAktif) return;
+    const tagihanPeriode = tagihan.filter(t => t.idPeriode === periodeAktif.id);
+    const sudahLunas     = tagihanPeriode.filter(t => t.statusBayar === "LUNAS").length;
+    const belumLunas     = tagihanPeriode.filter(t => t.statusBayar !== "LUNAS").length;
+    const totalTerkumpul = pembayaran
+      .filter(p => p.status === "APPROVED")
+      .filter(p => tagihanPeriode.find(t => t.id === p.tagihanId))
+      .reduce((s, p) => s + p.nominal, 0);
+
+    setPreviewTutup({ sudahLunas, belumLunas, totalTerkumpul, tagihanPeriode: tagihanPeriode.length });
+    setModalTutup(true);
+  };
+
+  // Generate tagihan bulan baru
+  const handleGenerate = async () => {
+    if (!formGenerate.bulan || !formGenerate.jatuhTempo) {
+      alert("Bulan dan jatuh tempo wajib diisi"); return;
+    }
+    setSaving(true);
+    try {
+      const res = await api.generateTagihan(formGenerate);
+      if (res.ok) {
+        dispatch({ type: "SET_NOTIFICATION", payload: {
+          type: "success",
+          msg: `✅ Tagihan ${res.bulan} berhasil dibuat! ${res.count} warga, ${res.autoApproved} auto-approved dari deposit.`
+        }});
+        setModalGenerate(false);
+        setFormGenerate({ bulan: "", jatuhTempo: "" });
+        onRefresh && onRefresh();
+      } else {
+        alert("❌ " + res.msg);
+      }
+    } catch (e) { alert("Error: " + e.message); }
+    setSaving(false);
+  };
+
+  // Tutup buku
+  const handleTutupBuku = async () => {
+    if (!periodeAktif) return;
+    setSaving(true);
+    try {
+      const res = await api.tutupBuku({ id_periode: periodeAktif.id });
+      if (res.ok) {
+        dispatch({ type: "SET_NOTIFICATION", payload: {
+          type: "success",
+          msg: `✅ Tutup buku ${res.bulan} selesai! ${res.tunggakCount} tunggakan, ${fmt(res.terkumpul)} terkumpul.`
+        }});
+        setModalTutup(false);
+        onRefresh && onRefresh();
+      } else {
+        alert("❌ " + res.msg);
+      }
+    } catch (e) { alert("Error: " + e.message); }
+    setSaving(false);
+  };
+
+  return (
+    <div className="space-y-6">
+      <h1 className="text-2xl sm:text-3xl font-bold text-slate-800">Periode & Tagihan</h1>
+
+      {/* Status periode aktif */}
+      {periodeAktif ? (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                <p className="text-sm font-semibold text-emerald-700">Periode Aktif</p>
+              </div>
+              <p className="text-2xl font-bold text-slate-800">{periodeAktif.bulan}</p>
+              <p className="text-xs text-slate-500 mt-1">Dibuka: {periodeAktif.tglBuka || "—"}</p>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={hitungPreviewTutup}
+                className="bg-amber-500 hover:bg-amber-600 text-white font-semibold py-2 px-4 rounded-xl text-sm">
+                🔒 Tutup Buku
+              </button>
+            </div>
+          </div>
+
+          {/* Progress periode aktif */}
+          {(() => {
+            const tagihanPeriode = tagihan.filter(t => t.idPeriode === periodeAktif.id);
+            const lunas = tagihanPeriode.filter(t => t.statusBayar === "LUNAS").length;
+            const total = tagihanPeriode.length;
+            const pct   = total > 0 ? Math.round((lunas / total) * 100) : 0;
+            return total > 0 ? (
+              <div className="mt-4 pt-4 border-t border-emerald-200">
+                <div className="flex justify-between text-xs text-emerald-700 mb-1.5">
+                  <span>{lunas}/{total} warga lunas</span>
+                  <span>{pct}%</span>
+                </div>
+                <div className="w-full bg-emerald-200 rounded-full h-2">
+                  <div className="bg-emerald-600 h-full rounded-full transition-all" style={{width:`${pct}%`}} />
+                </div>
+                <div className="flex justify-between text-xs text-slate-400 mt-1">
+                  <span>{fmt(lunas * tarif)} terkumpul</span>
+                  <span>Target {fmt(total * tarif)}</span>
+                </div>
+              </div>
+            ) : null;
+          })()}
+        </div>
+      ) : (
+        <div className="bg-slate-50 border-2 border-dashed border-slate-300 rounded-2xl p-6 text-center">
+          <p className="text-slate-500 font-semibold mb-1">Tidak ada periode aktif</p>
+          <p className="text-xs text-slate-400 mb-4">Generate tagihan untuk memulai periode baru</p>
+          <button onClick={() => setModalGenerate(true)}
+            className="bg-teal-600 hover:bg-teal-700 text-white font-semibold py-2 px-6 rounded-xl text-sm">
+            ➕ Generate Tagihan Bulan Baru
+          </button>
+        </div>
+      )}
+
+      {/* Tombol generate (kalau sudah ada periode aktif, disable) */}
+      {periodeAktif && (
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-slate-600">Generate Tagihan Bulan Baru</p>
+            <p className="text-xs text-slate-400 mt-0.5">Tutup buku periode aktif dulu sebelum generate bulan baru</p>
+          </div>
+          <button disabled
+            className="bg-slate-300 text-slate-500 font-semibold py-2 px-4 rounded-xl text-sm cursor-not-allowed">
+            🔒 Locked
+          </button>
+        </div>
+      )}
+
+      {/* Riwayat periode */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-100">
+          <h3 className="font-bold text-slate-700">Riwayat Periode</h3>
+        </div>
+        {periode.length === 0
+          ? <p className="text-center py-8 text-slate-400 text-sm">Belum ada periode</p>
+          : <div className="divide-y divide-slate-50">
+              {[...periode].reverse().map(p => {
+                const tagihanP = tagihan.filter(t => t.idPeriode === p.id);
+                const lunas    = tagihanP.filter(t => t.statusBayar === "LUNAS").length;
+                const tunggak  = tagihanP.filter(t => t.statusBayar === "TUNGGAK").length;
+                return (
+                  <div key={p.id} className="px-5 py-4 flex items-center gap-4">
+                    <div className={`w-2 h-10 rounded-full flex-shrink-0 ${p.status === "AKTIF" ? "bg-emerald-500" : "bg-slate-300"}`} />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="font-semibold text-slate-700">{p.bulan}</p>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
+                          p.status === "AKTIF"
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-slate-100 text-slate-500"
+                        }`}>{p.status}</span>
+                      </div>
+                      <div className="flex gap-3 mt-1 text-xs text-slate-400">
+                        <span>✅ {lunas} lunas</span>
+                        {tunggak > 0 && <span className="text-rose-500">⚠️ {tunggak} tunggak</span>}
+                        {p.tglTutup && <span>Ditutup: {p.tglTutup}</span>}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-bold text-teal-600 text-sm">{fmt(p.totalTerkumpul || 0)}</p>
+                      <p className="text-xs text-slate-400">terkumpul</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+        }
+      </div>
+
+      {/* Modal generate */}
+      {modalGenerate && (
+        <Modal title="Generate Tagihan Bulan Baru" onClose={() => setModalGenerate(false)}>
+          <div className="space-y-4">
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-700">
+              Sistem akan membuat tagihan untuk <strong>semua warga aktif ({warga.filter(w=>w.aktif).length} warga)</strong>.
+              Warga yang punya deposit cukup akan otomatis APPROVED.
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-600 mb-1">Nama Bulan</label>
+              <input type="text" placeholder="Contoh: Juni 2026"
+                value={formGenerate.bulan}
+                onChange={e => setFormGenerate(f => ({...f, bulan: e.target.value}))}
+                className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-600 mb-1">Jatuh Tempo</label>
+              <input type="date"
+                value={formGenerate.jatuhTempo}
+                onChange={e => setFormGenerate(f => ({...f, jatuhTempo: e.target.value}))}
+                className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+            </div>
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-700">
+              ⚠️ Tarif IPL: <strong>{fmt(tarif)}</strong> per unit.
+              Ubah di sheet Config jika perlu sebelum generate.
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setModalGenerate(false)}
+                className="flex-1 border border-slate-300 text-slate-600 py-2 rounded-xl text-sm font-semibold">Batal</button>
+              <button onClick={handleGenerate} disabled={saving}
+                className="flex-1 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white py-2 rounded-xl text-sm font-semibold">
+                {saving ? "⏳ Memproses..." : "✅ Generate Tagihan"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Modal tutup buku */}
+      {modalTutup && previewTutup && (
+        <Modal title="🔒 Tutup Buku" onClose={() => setModalTutup(false)}>
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">
+              Kamu akan menutup periode <strong>{periodeAktif?.bulan}</strong>. Ringkasan:
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-center">
+                <p className="text-2xl font-bold text-emerald-600">{previewTutup.sudahLunas}</p>
+                <p className="text-xs text-slate-500 mt-0.5">Sudah Lunas</p>
+              </div>
+              <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-center">
+                <p className="text-2xl font-bold text-rose-600">{previewTutup.belumLunas}</p>
+                <p className="text-xs text-slate-500 mt-0.5">Akan Jadi Tunggakan</p>
+              </div>
+            </div>
+            <div className="bg-teal-50 border border-teal-200 rounded-xl p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Total Terkumpul</p>
+              <p className="text-xl font-bold text-teal-700">{fmt(previewTutup.totalTerkumpul)}</p>
+            </div>
+            {previewTutup.belumLunas > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-700">
+                ⚠️ <strong>{previewTutup.belumLunas} warga</strong> belum bayar akan masuk tunggakan.
+                Tunggakan akan diprioritaskan di periode berikutnya (FIFO).
+              </div>
+            )}
+            <div className="flex gap-3">
+              <button onClick={() => setModalTutup(false)}
+                className="flex-1 border border-slate-300 text-slate-600 py-2 rounded-xl text-sm font-semibold">Batal</button>
+              <button onClick={handleTutupBuku} disabled={saving}
+                className="flex-1 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white py-2 rounded-xl text-sm font-semibold">
+                {saving ? "⏳ Memproses..." : "🔒 Konfirmasi Tutup Buku"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 // ─── ADMIN: KAS ───────────────────────────────────────────────────────────────
 function AdminKas({ state, dispatch }) {
   const { kas, kasRingkasan, warga, pembayaran } = state;
@@ -2526,6 +2810,7 @@ const USER_MENU = [
 ];
 const ADMIN_MENU = [
   { id: "admin-dashboard",  label: "Dashboard",    icon: "📊" },
+  { id: "admin-periode",    label: "Periode",      icon: "📅" },
   { id: "admin-status",     label: "Status Warga", icon: "👥" },
   { id: "admin-kas",        label: "Kas",          icon: "💰" },
   { id: "admin-mutasi",     label: "Mutasi Bank",  icon: "📁" },
@@ -2618,6 +2903,7 @@ export default function App() {
     }
     switch (page) {
       case "admin-dashboard":  return <AdminDashboard  state={state} onRefresh={handleRefresh} refreshing={refreshing} />;
+      case "admin-periode":    return <AdminPeriode    state={state} dispatch={dispatch} onRefresh={handleRefresh} />;
       case "admin-status":     return <AdminStatusWarga state={state} />;
       case "admin-kas":        return <AdminKas         state={state} dispatch={dispatch} />;
       case "admin-mutasi":     return <AdminUploadMutasi state={state} dispatch={dispatch} />;
