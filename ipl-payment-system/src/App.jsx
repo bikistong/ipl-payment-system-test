@@ -3,7 +3,7 @@ import { useState, useReducer, useRef, useEffect, useCallback } from "react";
 // ─────────────────────────────────────────────────────────────────────────────
 // 🔧 KONFIGURASI
 // ─────────────────────────────────────────────────────────────────────────────
-const APPSCRIPT_URL = "https://script.google.com/macros/s/AKfycbyU005I1auRL8h7whcX5rNmto9AvbVYqw0tUw3jz_SEGMqct2LjnqwwMeQ6nD_sxtg9/exec";
+const APPSCRIPT_URL = "https://script.google.com/macros/s/AKfycby5T_7rIonpMwDt4dsq1rjjB9-vtKbeoDUpgWk2fVkTJRnUe-tBQh0nj-0FTMKdQnQ1/exec";
 
 // ─── API LAYER ────────────────────────────────────────────────────────────────
 const api = {
@@ -54,6 +54,13 @@ const api = {
 
   autoMatch: () =>
     fetch(`${APPSCRIPT_URL}?action=autoMatch`).then(r => r.json()),
+
+  submitBulkPembayaran: (payload) =>
+    fetch(APPSCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ action: "submitBulkPembayaran", ...payload }),
+    }).then(r => r.json()),
 
   approvePembayaranManual: (payload) =>
     fetch(APPSCRIPT_URL, {
@@ -159,6 +166,14 @@ function reducer(state, action) {
         notification: { type: "success", msg: "✅ Pembayaran manual berhasil dicatat!" },
       };
 
+    case "ADD_BULK_PEMBAYARAN":
+      return {
+        ...state,
+        saving: false,
+        pembayaran: [...state.pembayaran, ...action.payload],
+        notification: { type: "success", msg: `✅ ${action.payload.length} pembayaran bulk berhasil dikirim!` },
+      };
+
     case "SET_WARGA":
       return { ...state, currentWarga: action.payload };
 
@@ -205,6 +220,102 @@ function reducer(state, action) {
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 const fmt     = n => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(n);
 const fmtDate = d => new Date(d).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" });
+
+
+// ─── SEARCH SELECT ────────────────────────────────────────────────────────────
+function SearchSelect({ placeholder, value, onChange, options, renderOption, renderValue, emptyText }) {
+  const [open, setOpen]     = useState(false);
+  const [query, setQuery]   = useState("");
+  const ref                 = useRef();
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const filtered = query
+    ? options.filter(o => renderOption(o).toLowerCase().includes(query.toLowerCase()))
+    : options;
+
+  const selected = options.find(o => o.value === value);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button type="button" onClick={() => { setOpen(o => !o); setQuery(""); }}
+        className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm text-left flex items-center justify-between focus:outline-none focus:ring-2 focus:ring-teal-400 bg-white">
+        <span className={selected ? "text-slate-800" : "text-slate-400"}>
+          {selected ? (renderValue ? renderValue(selected) : renderOption(selected)) : placeholder}
+        </span>
+        <span className="text-slate-400 ml-2">{open ? "▲" : "▼"}</span>
+      </button>
+
+      {open && (
+        <div className="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden">
+          <div className="p-2 border-b border-slate-100">
+            <input autoFocus type="text" placeholder="Ketik untuk cari..."
+              value={query} onChange={e => setQuery(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-400" />
+          </div>
+          <div className="max-h-52 overflow-y-auto">
+            {filtered.length === 0
+              ? <p className="text-center text-slate-400 text-xs py-4">{emptyText || "Tidak ada hasil"}</p>
+              : filtered.map(o => (
+                <button key={o.value} type="button"
+                  onClick={() => { onChange(o.value); setOpen(false); setQuery(""); }}
+                  className={`w-full text-left px-4 py-2.5 text-sm hover:bg-teal-50 transition-colors ${o.value === value ? "bg-teal-50 text-teal-700 font-semibold" : "text-slate-700"}`}>
+                  {renderOption(o)}
+                </button>
+              ))
+            }
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── SEARCH LIST (untuk pilih multi-item dengan search) ───────────────────────
+function SearchList({ placeholder, items, selectedKeys, onToggle, renderItem, maxSelect, disabled }) {
+  const [query, setQuery] = useState("");
+  const filtered = query
+    ? items.filter(i => renderItem(i).toLowerCase().includes(query.toLowerCase()))
+    : items;
+
+  return (
+    <div className="border border-slate-200 rounded-xl overflow-hidden">
+      <div className="p-2 border-b border-slate-100 bg-slate-50">
+        <input type="text" placeholder={placeholder || "Ketik untuk cari..."}
+          value={query} onChange={e => setQuery(e.target.value)}
+          className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-400 bg-white" />
+      </div>
+      <div className="max-h-56 overflow-y-auto divide-y divide-slate-50">
+        {filtered.length === 0
+          ? <p className="text-center text-slate-400 text-xs py-6">Tidak ada hasil</p>
+          : filtered.map(item => {
+            const isSelected = selectedKeys.includes(item.key);
+            const isDisabled = disabled || (!isSelected && maxSelect && selectedKeys.length >= maxSelect);
+            return (
+              <button key={item.key} type="button"
+                onClick={() => !isDisabled && onToggle(item)}
+                disabled={isDisabled}
+                className={`w-full text-left px-4 py-2.5 text-sm transition-colors flex items-center gap-3 ${
+                  isSelected ? "bg-teal-50 text-teal-700" : isDisabled ? "opacity-40 cursor-not-allowed bg-slate-50" : "hover:bg-slate-50 text-slate-700"
+                }`}>
+                <span className={`w-4 h-4 rounded flex-shrink-0 border-2 flex items-center justify-center text-xs ${
+                  isSelected ? "bg-teal-600 border-teal-600 text-white" : "border-slate-300"
+                }`}>
+                  {isSelected && "✓"}
+                </span>
+                <span>{renderItem(item)}</span>
+              </button>
+            );
+          })
+        }
+      </div>
+    </div>
+  );
+}
 
 // ─── STATUS BADGE ─────────────────────────────────────────────────────────────
 function StatusBadge({ status }) {
@@ -617,49 +728,80 @@ function QRISPage({ state }) {
   );
 }
 
-// ─── USER: KONFIRMASI PEMBAYARAN ──────────────────────────────────────────────
+// ─── USER: KONFIRMASI PEMBAYARAN (+ BULK PAYMENT) ────────────────────────────
 function UserKonfirmasi({ state, dispatch }) {
-  const { currentWarga, pembayaran, tagihan } = state;
+  const { currentWarga, pembayaran, tagihan, warga, config } = state;
   if (!currentWarga) return null;
 
+  const tarif = Number(config.nominal_ipl) || 40000;
+
   const [modal, setModal]               = useState(null);
+  const [isBulk, setIsBulk]             = useState(false);
   const [selectedTagihan, setSelectedTagihan] = useState("");
   const [buktiFile, setBuktiFile]       = useState(null);
   const [catatan, setCatatan]           = useState("");
   const [saving, setSaving]             = useState(false);
+  const [nominalBulk, setNominalBulk]   = useState("");
+  const [selectedUnits, setSelectedUnits] = useState([]);
   const fileInputRef = useRef();
 
+  // Tagihan belum lunas milik sendiri (hanya bisa submit 1x per tagihan aktif)
   const tagihanBelumLunas = tagihan.filter(t =>
     t.wargaId === currentWarga.id &&
-    !pembayaran.find(p => p.tagihanId === t.id && p.status === "APPROVED")
+    !pembayaran.find(p =>
+      p.tagihanId === t.id &&
+      ["APPROVED","PENDING","MATCHED"].includes(p.status)
+    )
   );
 
+  // Untuk bulk: tagihan belum lunas semua warga (kecuali diri sendiri)
+  const allTagihanBelumLunas = tagihan.filter(t =>
+    !pembayaran.find(p =>
+      p.tagihanId === t.id &&
+      ["APPROVED","PENDING","MATCHED"].includes(p.status)
+    )
+  );
+
+  // Hitung berapa unit bisa dibayar
+  const jumlahUnit  = tarif > 0 ? Math.floor(Number(nominalBulk) / tarif) : 0;
+  const sisaBulk    = tarif > 0 ? Number(nominalBulk) % tarif : 0;
+
+  const toggleUnit = (wargaId, tagihanId) => {
+    const key = `${wargaId}__${tagihanId}`;
+    setSelectedUnits(prev =>
+      prev.find(u => u.key === key)
+        ? prev.filter(u => u.key !== key)
+        : [...prev, { key, id_warga: wargaId, id_tagihan: tagihanId }]
+    );
+  };
+
+  // Upload bukti helper
+  const uploadBuktiFile = async () => {
+    if (!buktiFile) return null;
+    const base64Data = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = e => resolve(e.target.result.split(",")[1]);
+      reader.onerror = () => reject(new Error("Gagal membaca file"));
+      reader.readAsDataURL(buktiFile);
+    });
+    const res = await api.uploadBukti({
+      fileName: buktiFile.name,
+      fileData: base64Data,
+      wargaId:  currentWarga.id,
+    });
+    if (!res.ok) throw new Error("Upload bukti gagal: " + res.msg);
+    return res.buktiUrl;
+  };
+
+  // Submit biasa (1 unit)
   const handleSubmit = async () => {
     if (!selectedTagihan) { alert("Pilih tagihan dulu"); return; }
     setSaving(true);
     try {
-      const tgh = tagihan.find(t => t.id === selectedTagihan);
+      const tgh     = tagihan.find(t => t.id === selectedTagihan);
       if (!tgh) throw new Error("Tagihan tidak ditemukan");
-
-      let buktiUrl = null;
-      if (buktiFile) {
-        const base64Data = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = e => resolve(e.target.result.split(",")[1]);
-          reader.onerror = () => reject(new Error("Gagal membaca file"));
-          reader.readAsDataURL(buktiFile);
-        });
-        const buktiRes = await api.uploadBukti({
-          fileName: buktiFile.name,
-          fileData: base64Data,
-          wargaId: currentWarga.id,
-          tagihanId: selectedTagihan,
-        });
-        if (!buktiRes.ok) throw new Error("Upload bukti gagal: " + buktiRes.msg);
-        buktiUrl = buktiRes.buktiUrl;
-      }
-
-      const submitRes = await api.submitPembayaran({
+      const buktiUrl = await uploadBuktiFile();
+      const res = await api.submitPembayaran({
         id_warga:   currentWarga.id,
         id_tagihan: selectedTagihan,
         nominal:    tgh.nominal,
@@ -667,14 +809,41 @@ function UserKonfirmasi({ state, dispatch }) {
         bukti:      buktiUrl || null,
         tanggal:    new Date().toISOString().split("T")[0],
       });
+      if (!res.ok) throw new Error(res.msg);
+      dispatch({ type: "ADD_PEMBAYARAN", payload: res.data });
+      setModal(null); setSelectedTagihan(""); setBuktiFile(null); setCatatan("");
+    } catch (err) {
+      alert("❌ " + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
 
-      if (!submitRes.ok) throw new Error("Submit gagal: " + submitRes.msg);
-
-      dispatch({ type: "ADD_PEMBAYARAN", payload: submitRes.data });
-      setModal(null);
-      setSelectedTagihan("");
-      setBuktiFile(null);
-      setCatatan("");
+  // Submit bulk
+  const handleSubmitBulk = async () => {
+    if (selectedUnits.length === 0) { alert("Pilih minimal 1 unit"); return; }
+    if (selectedUnits.length > jumlahUnit) {
+      alert(`Nominal ${fmt(Number(nominalBulk))} hanya cukup untuk ${jumlahUnit} unit`); return;
+    }
+    setSaving(true);
+    try {
+      const buktiUrl = await uploadBuktiFile();
+      const res = await api.submitBulkPembayaran({
+        id_warga_pengirim: currentWarga.id,
+        unitList:          selectedUnits.map(u => ({ id_warga: u.id_warga, id_tagihan: u.id_tagihan })),
+        nominal_total:     Number(nominalBulk),
+        bukti:             buktiUrl || null,
+        tanggal:           new Date().toISOString().split("T")[0],
+        catatan:           catatan || `Bulk payment dari ${currentWarga.nama}`,
+      });
+      if (!res.ok) throw new Error(res.msg);
+      dispatch({ type: "ADD_BULK_PEMBAYARAN", payload: res.data });
+      if (res.sisaDeposit > 0) {
+        dispatch({ type: "SET_NOTIFICATION", payload: {
+          type: "info", msg: `💎 Sisa ${fmt(res.sisaDeposit)} masuk sebagai deposit kamu!`
+        }});
+      }
+      setModal(null); setNominalBulk(""); setSelectedUnits([]); setBuktiFile(null); setCatatan("");
     } catch (err) {
       alert("❌ " + err.message);
     } finally {
@@ -697,49 +866,136 @@ function UserKonfirmasi({ state, dispatch }) {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <h1 className="text-2xl sm:text-3xl font-bold text-slate-800">Konfirmasi Pembayaran</h1>
-        {tagihanBelumLunas.length > 0 && (
-          <button onClick={() => setModal("submit")} className="w-full sm:w-auto bg-teal-600 hover:bg-teal-700 text-white font-semibold py-2 px-4 rounded-xl">
-            + Konfirmasi Pembayaran
+        <div className="flex gap-2 w-full sm:w-auto">
+          {tagihanBelumLunas.length > 0 && (
+            <button onClick={() => { setIsBulk(false); setModal("submit"); }}
+              className="flex-1 sm:flex-none bg-teal-600 hover:bg-teal-700 text-white font-semibold py-2 px-4 rounded-xl text-sm">
+              + Konfirmasi
+            </button>
+          )}
+          <button onClick={() => { setIsBulk(true); setModal("submit"); }}
+            className="flex-1 sm:flex-none bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-xl text-sm">
+            👥 Bayar Beberapa Unit
           </button>
-        )}
+        </div>
       </div>
+
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
         <h3 className="font-bold text-slate-700 mb-4">Riwayat Konfirmasi</h3>
         <PaymentTable rows={myPembayaran} columns={cols} />
       </div>
 
-      {modal === "submit" && (
+      {/* Modal submit biasa */}
+      {modal === "submit" && !isBulk && (
         <Modal title="Konfirmasi Pembayaran" onClose={() => setModal(null)}>
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-semibold text-slate-600 mb-1">Pilih Tagihan</label>
-              <select value={selectedTagihan} onChange={e => setSelectedTagihan(e.target.value)}
-                className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400">
-                <option value="">— Pilih tagihan —</option>
-                {tagihanBelumLunas.map(t => (
-                  <option key={t.id} value={t.id}>{t.keterangan} — {fmt(t.nominal)}</option>
-                ))}
-              </select>
+              <SearchSelect
+                placeholder="Cari tagihan..."
+                value={selectedTagihan}
+                onChange={setSelectedTagihan}
+                options={tagihanBelumLunas.map(t => ({ value: t.id, label: `${t.keterangan} — ${fmt(t.nominal)}` }))}
+                renderOption={o => o.label}
+                emptyText="Tidak ada tagihan aktif"
+              />
             </div>
             <div>
               <label className="block text-sm font-semibold text-slate-600 mb-1">Catatan (Nomor Rumah)</label>
-              <input type="text" placeholder="Contoh: B234" value={catatan} onChange={e => setCatatan(e.target.value)}
+              <input type="text" placeholder="Contoh: B234" value={catatan}
+                onChange={e => setCatatan(e.target.value)}
                 className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-slate-600 mb-1">Upload Bukti Transfer (Opsional)</label>
+              <label className="block text-sm font-semibold text-slate-600 mb-1">Upload Bukti (Opsional)</label>
               <button onClick={() => fileInputRef.current.click()}
                 className="w-full border-2 border-dashed border-teal-300 rounded-xl p-4 text-center hover:bg-teal-50 transition-colors">
-                <p className="text-sm text-teal-600 font-semibold">{buktiFile ? buktiFile.name : "📸 Klik untuk upload bukti"}</p>
+                <p className="text-sm text-teal-600 font-semibold">{buktiFile ? buktiFile.name : "📸 Klik untuk upload"}</p>
               </button>
               <input ref={fileInputRef} type="file" accept="image/*,application/pdf"
                 onChange={e => setBuktiFile(e.target.files?.[0])} className="hidden" />
             </div>
             <div className="flex gap-3">
-              <button onClick={() => setModal(null)} className="flex-1 border border-slate-300 text-slate-600 py-2 rounded-xl text-sm font-semibold hover:bg-slate-50">Batal</button>
+              <button onClick={() => setModal(null)} className="flex-1 border border-slate-300 text-slate-600 py-2 rounded-xl text-sm font-semibold">Batal</button>
               <button onClick={handleSubmit} disabled={saving || !selectedTagihan}
                 className="flex-1 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white py-2 rounded-xl text-sm font-semibold">
                 {saving ? "⏳ Mengirim..." : "✅ Konfirmasi"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Modal bulk payment */}
+      {modal === "submit" && isBulk && (
+        <Modal title="👥 Bayar Beberapa Unit" onClose={() => setModal(null)}>
+          <div className="space-y-4">
+            {/* Info tarif */}
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-700">
+              Tarif IPL per unit: <strong>{fmt(tarif)}</strong>
+            </div>
+
+            {/* Input nominal */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-600 mb-1">Total Nominal Transfer</label>
+              <input type="number" placeholder={`Contoh: ${tarif * 3} (untuk 3 unit)`}
+                value={nominalBulk} onChange={e => { setNominalBulk(e.target.value); setSelectedUnits([]); }}
+                className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+              {nominalBulk && (
+                <div className="mt-2 bg-slate-50 rounded-lg p-3 text-xs">
+                  <p className="font-semibold text-slate-700">
+                    Bisa bayar: <span className="text-blue-600">{jumlahUnit} unit</span>
+                    {sisaBulk > 0 && <span className="text-teal-600"> + sisa {fmt(sisaBulk)} → deposit</span>}
+                  </p>
+                  <p className="text-slate-400 mt-0.5">Pilih tepat {jumlahUnit} unit di bawah</p>
+                </div>
+              )}
+            </div>
+
+            {/* Pilih unit */}
+            {jumlahUnit > 0 && (
+              <div>
+                <label className="block text-sm font-semibold text-slate-600 mb-2">
+                  Pilih Unit ({selectedUnits.length}/{jumlahUnit} dipilih)
+                </label>
+                <SearchList
+                  placeholder="Cari nama atau blok..."
+                  items={allTagihanBelumLunas.map(t => {
+                    const w = warga.find(w => w.id === t.wargaId);
+                    return { key: `${t.wargaId}__${t.id}`, id_warga: t.wargaId, id_tagihan: t.id, w, t };
+                  })}
+                  selectedKeys={selectedUnits.map(u => u.key)}
+                  onToggle={item => toggleUnit(item.id_warga, item.id_tagihan)}
+                  maxSelect={jumlahUnit}
+                  renderItem={item => `${item.w?.blok}${item.w?.nomor} · ${item.w?.nama}`}
+                />
+              </div>
+            )}
+
+            {/* Upload bukti */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-600 mb-1">Upload Bukti Transfer</label>
+              <button onClick={() => fileInputRef.current.click()}
+                className="w-full border-2 border-dashed border-blue-300 rounded-xl p-3 text-center hover:bg-blue-50 transition-colors">
+                <p className="text-sm text-blue-600 font-semibold">{buktiFile ? buktiFile.name : "📸 Klik untuk upload"}</p>
+              </button>
+              <input ref={fileInputRef} type="file" accept="image/*,application/pdf"
+                onChange={e => setBuktiFile(e.target.files?.[0])} className="hidden" />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-600 mb-1">Catatan</label>
+              <input type="text" placeholder="Catatan opsional" value={catatan}
+                onChange={e => setCatatan(e.target.value)}
+                className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+            </div>
+
+            <div className="flex gap-3">
+              <button onClick={() => setModal(null)} className="flex-1 border border-slate-300 text-slate-600 py-2 rounded-xl text-sm font-semibold">Batal</button>
+              <button onClick={handleSubmitBulk}
+                disabled={saving || selectedUnits.length === 0 || !nominalBulk}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-2 rounded-xl text-sm font-semibold">
+                {saving ? "⏳ Mengirim..." : `✅ Kirim (${selectedUnits.length} unit)`}
               </button>
             </div>
           </div>
@@ -1269,6 +1525,7 @@ function AdminMatching({ state, dispatch }) {
   const { pembayaran, mutasi, warga } = state;
   const [assignModal, setAssignModal] = useState(null);
   const [saving, setSaving]           = useState(false);
+  const [assignSearchQ, setAssignSearchQ] = useState("");
 
   const getWarga     = (id) => warga.find(w => w.id === id);
   const unmatched    = mutasi.filter(m => !m.matched);
@@ -1370,19 +1627,37 @@ function AdminMatching({ state, dispatch }) {
           <p className="text-sm text-slate-600 mb-3">
             Pilih mutasi untuk <strong>{getWarga(assignModal.wargaId)?.nama || "—"}</strong> — {fmt(assignModal.nominal)}:
           </p>
-          <div className="space-y-2 max-h-72 overflow-y-auto">
-            {unmatched.length === 0
-              ? <p className="text-center text-slate-400 text-sm py-4">Tidak ada mutasi yang tersedia</p>
-              : unmatched.map(m => (
-                <button key={m.id} onClick={() => handleAssign(m.id)} disabled={saving}
-                  className="w-full text-left p-3 border border-slate-200 rounded-xl hover:border-blue-400 hover:bg-blue-50 transition-colors disabled:opacity-50">
-                  <p className="font-semibold text-slate-700 text-sm">{m.pengirim}</p>
-                  <p className="text-xs text-slate-400">{fmtDate(m.tanggal)} · {m.keterangan}</p>
-                  <p className="text-sm font-bold text-teal-600 mt-1">{fmt(m.nominal)}</p>
-                </button>
-              ))
-            }
-          </div>
+          {unmatched.length === 0
+            ? <p className="text-center text-slate-400 text-sm py-4">Tidak ada mutasi yang tersedia</p>
+            : (() => {
+                const [q, setQ] = [assignSearchQ, setAssignSearchQ];
+                const filtered  = q ? unmatched.filter(m =>
+                  m.pengirim?.toLowerCase().includes(q.toLowerCase()) ||
+                  String(m.nominal).includes(q) ||
+                  m.keterangan?.toLowerCase().includes(q.toLowerCase())
+                ) : unmatched;
+                return (
+                  <div className="space-y-2">
+                    <input type="text" placeholder="Cari pengirim, nominal, keterangan..."
+                      value={q} onChange={e => setQ(e.target.value)}
+                      className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                    <div className="max-h-60 overflow-y-auto space-y-1.5">
+                      {filtered.length === 0
+                        ? <p className="text-center text-slate-400 text-xs py-4">Tidak ada hasil</p>
+                        : filtered.map(m => (
+                          <button key={m.id} onClick={() => handleAssign(m.id)} disabled={saving}
+                            className="w-full text-left p-3 border border-slate-200 rounded-xl hover:border-blue-400 hover:bg-blue-50 transition-colors disabled:opacity-50">
+                            <p className="font-semibold text-slate-700 text-sm">{m.pengirim}</p>
+                            <p className="text-xs text-slate-400">{fmtDate(m.tanggal)} · {m.keterangan}</p>
+                            <p className="text-sm font-bold text-teal-600 mt-1">{fmt(m.nominal)}</p>
+                          </button>
+                        ))
+                      }
+                    </div>
+                  </div>
+                );
+              })()
+          }
         </Modal>
       )}
     </div>
@@ -1949,12 +2224,31 @@ function AdminStatusWarga({ state }) {
   );
 }
 
-// ─── ADMIN: CATAT PEMBAYARAN MANUAL ──────────────────────────────────────────
+// ─── ADMIN: CATAT PEMBAYARAN MANUAL (+ BULK) ─────────────────────────────────
 function AdminCatatManual({ state, dispatch }) {
-  const { warga, tagihan, pembayaran, mutasi } = state;
-  const [form, setForm] = useState({ id_warga: "", id_tagihan: "", nominal: "", tanggal: "", catatan: "", mutasiId: "" });
-  const [saving, setSaving] = useState(false);
+  const { warga, tagihan, pembayaran, mutasi, config } = state;
+  const tarif = Number(config.nominal_ipl) || 40000;
 
+  const [mode, setMode]         = useState("single"); // "single" | "bulk"
+  const [saving, setSaving]     = useState(false);
+
+  // State single
+  const [form, setForm] = useState({
+    id_warga: "", id_tagihan: "", nominal: "", tanggal: "", catatan: "", mutasiId: ""
+  });
+
+  // State bulk
+  const [nominalBulk, setNominalBulk]     = useState("");
+  const [selectedUnits, setSelectedUnits] = useState([]);
+  const [catatanBulk, setCatatanBulk]     = useState("");
+  const [mutasiIdBulk, setMutasiIdBulk]   = useState("");
+
+  const jumlahUnit = tarif > 0 ? Math.floor(Number(nominalBulk) / tarif) : 0;
+  const sisaBulk   = tarif > 0 ? Number(nominalBulk) % tarif : 0;
+
+  const unmatchedMutasi = mutasi.filter(m => !m.matched);
+
+  // Tagihan belum lunas per warga (single)
   const getTagihanWarga = () => {
     if (!form.id_warga) return [];
     return tagihan.filter(t =>
@@ -1963,9 +2257,22 @@ function AdminCatatManual({ state, dispatch }) {
     );
   };
 
-  const unmatchedMutasi = mutasi.filter(m => !m.matched);
+  // Semua tagihan belum lunas (bulk)
+  const allTagihanBelumLunas = tagihan.filter(t =>
+    !pembayaran.find(p => p.tagihanId === t.id && ["APPROVED","PENDING","MATCHED"].includes(p.status))
+  );
 
-  const handleSimpan = async () => {
+  const toggleUnit = (wargaId, tagihanId) => {
+    const key = `${wargaId}__${tagihanId}`;
+    setSelectedUnits(prev =>
+      prev.find(u => u.key === key)
+        ? prev.filter(u => u.key !== key)
+        : [...prev, { key, id_warga: wargaId, id_tagihan: tagihanId }]
+    );
+  };
+
+  // Submit single manual
+  const handleSimpanSingle = async () => {
     if (!form.id_warga || !form.id_tagihan || !form.nominal) {
       alert("Warga, tagihan, dan nominal wajib diisi"); return;
     }
@@ -1975,12 +2282,38 @@ function AdminCatatManual({ state, dispatch }) {
       if (res.ok) {
         dispatch({ type: "ADD_PEMBAYARAN_MANUAL", payload: res.data });
         setForm({ id_warga: "", id_tagihan: "", nominal: "", tanggal: "", catatan: "", mutasiId: "" });
-      } else {
-        alert("Gagal: " + res.msg);
-      }
-    } catch (e) {
-      alert("Error: " + e.message);
+      } else alert("Gagal: " + res.msg);
+    } catch (e) { alert("Error: " + e.message); }
+    setSaving(false);
+  };
+
+  // Submit bulk manual
+  const handleSimpanBulk = async () => {
+    if (selectedUnits.length === 0) { alert("Pilih minimal 1 unit"); return; }
+    if (selectedUnits.length > jumlahUnit) {
+      alert(`Nominal hanya cukup untuk ${jumlahUnit} unit`); return;
     }
+    setSaving(true);
+    try {
+      const res = await api.submitBulkPembayaran({
+        id_warga_pengirim: "ADMIN",
+        unitList:          selectedUnits.map(u => ({ id_warga: u.id_warga, id_tagihan: u.id_tagihan })),
+        nominal_total:     Number(nominalBulk),
+        bukti:             "",
+        tanggal:           new Date().toISOString().split("T")[0],
+        catatan:           catatanBulk || "Catat manual bulk oleh admin",
+        mutasiId:          mutasiIdBulk || "",
+      });
+      if (res.ok) {
+        dispatch({ type: "ADD_BULK_PEMBAYARAN", payload: res.data });
+        if (res.sisaDeposit > 0) {
+          dispatch({ type: "SET_NOTIFICATION", payload: {
+            type: "info", msg: `💎 Sisa ${fmt(res.sisaDeposit)} masuk sebagai deposit`
+          }});
+        }
+        setNominalBulk(""); setSelectedUnits([]); setCatatanBulk(""); setMutasiIdBulk("");
+      } else alert("Gagal: " + res.msg);
+    } catch (e) { alert("Error: " + e.message); }
     setSaving(false);
   };
 
@@ -1991,72 +2324,193 @@ function AdminCatatManual({ state, dispatch }) {
       <h1 className="text-2xl sm:text-3xl font-bold text-slate-800">Catat Pembayaran Manual</h1>
 
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-700">
-        ⚠️ Gunakan fitur ini untuk menutup tagihan warga yang sudah bayar tapi tidak kirim konfirmasi lewat sistem.
+        ⚠️ Gunakan untuk menutup tagihan warga yang sudah bayar tapi tidak kirim konfirmasi lewat sistem.
         Pembayaran akan langsung berstatus <strong>APPROVED</strong>.
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
-        <div>
-          <label className="block text-sm font-semibold text-slate-600 mb-1">Pilih Warga</label>
-          <select value={form.id_warga} onChange={e => setForm(f => ({...f, id_warga:e.target.value, id_tagihan:""}))}
-            className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400">
-            <option value="">— Pilih warga —</option>
-            {warga.map(w => <option key={w.id} value={w.id}>{w.nama} ({w.blok}{w.nomor})</option>)}
-          </select>
-        </div>
-
-        <div>
-          <label className="block text-sm font-semibold text-slate-600 mb-1">Pilih Tagihan</label>
-          <select value={form.id_tagihan} onChange={e => {
-            const t = tagihan.find(t => t.id === e.target.value);
-            setForm(f => ({...f, id_tagihan:e.target.value, nominal: t?.nominal || f.nominal}));
-          }}
-            disabled={!form.id_warga}
-            className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 disabled:opacity-50">
-            <option value="">— Pilih tagihan —</option>
-            {tagihanWarga.map(t => <option key={t.id} value={t.id}>{t.keterangan || t.bulan} — {fmt(t.nominal)}</option>)}
-          </select>
-          {form.id_warga && tagihanWarga.length === 0 && (
-            <p className="text-xs text-emerald-600 mt-1">✅ Semua tagihan warga ini sudah lunas</p>
-          )}
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-sm font-semibold text-slate-600 mb-1">Nominal</label>
-            <input type="number" value={form.nominal} onChange={e => setForm(f => ({...f, nominal:e.target.value}))}
-              className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-slate-600 mb-1">Tanggal Bayar</label>
-            <input type="date" value={form.tanggal} onChange={e => setForm(f => ({...f, tanggal:e.target.value}))}
-              className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-sm font-semibold text-slate-600 mb-1">Link ke Mutasi (Opsional)</label>
-          <select value={form.mutasiId} onChange={e => setForm(f => ({...f, mutasiId:e.target.value}))}
-            className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400">
-            <option value="">— Tidak ada / pilih mutasi —</option>
-            {unmatchedMutasi.map(m => (
-              <option key={m.id} value={m.id}>{m.pengirim} · {fmtDate(m.tanggal)} · {fmt(m.nominal)}</option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label className="block text-sm font-semibold text-slate-600 mb-1">Catatan</label>
-          <input type="text" placeholder="Contoh: Bayar tunai ke ketua RT" value={form.catatan}
-            onChange={e => setForm(f => ({...f, catatan:e.target.value}))}
-            className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
-        </div>
-
-        <button onClick={handleSimpan} disabled={saving || !form.id_warga || !form.id_tagihan || !form.nominal}
-          className="w-full bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white font-semibold py-3 rounded-xl">
-          {saving ? "⏳ Menyimpan..." : "✅ Catat & Approve Pembayaran"}
-        </button>
+      {/* Toggle mode */}
+      <div className="flex gap-2 bg-slate-100 p-1 rounded-xl w-fit">
+        {[["single","👤 1 Unit"],["bulk","👥 Beberapa Unit"]].map(([val, label]) => (
+          <button key={val} onClick={() => setMode(val)}
+            className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all ${mode===val ? "bg-white shadow text-teal-700" : "text-slate-500 hover:text-slate-700"}`}>
+            {label}
+          </button>
+        ))}
       </div>
+
+      {/* ── SINGLE MODE ── */}
+      {mode === "single" && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-slate-600 mb-1">Pilih Warga</label>
+            <SearchSelect
+              placeholder="Cari nama atau blok..."
+              value={form.id_warga}
+              onChange={v => setForm(f => ({...f, id_warga: v, id_tagihan: ""}))}
+              options={warga.map(w => ({ value: w.id, label: w.nama, blok: w.blok, nomor: w.nomor }))}
+              renderOption={o => `${o.label} (${o.blok}${o.nomor})`}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-slate-600 mb-1">Pilih Tagihan</label>
+            {!form.id_warga
+              ? <div className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-400 bg-slate-50">Pilih warga dulu</div>
+              : tagihanWarga.length === 0
+                ? <div className="w-full border border-emerald-200 rounded-xl px-3 py-2.5 text-sm text-emerald-600 bg-emerald-50">✅ Semua tagihan sudah lunas</div>
+                : <SearchSelect
+                    placeholder="Cari tagihan..."
+                    value={form.id_tagihan}
+                    onChange={v => {
+                      const t = tagihan.find(t => t.id === v);
+                      setForm(f => ({...f, id_tagihan: v, nominal: t?.nominal || f.nominal}));
+                    }}
+                    options={tagihanWarga.map(t => ({ value: t.id, label: `${t.keterangan || t.bulan} — ${fmt(t.nominal)}` }))}
+                    renderOption={o => o.label}
+                  />
+            }
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-semibold text-slate-600 mb-1">Nominal</label>
+              <input type="number" value={form.nominal}
+                onChange={e => setForm(f => ({...f, nominal: e.target.value}))}
+                className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-600 mb-1">Tanggal Bayar</label>
+              <input type="date" value={form.tanggal}
+                onChange={e => setForm(f => ({...f, tanggal: e.target.value}))}
+                className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+            </div>
+          </div>
+
+          {/* Preview kalkulasi otomatis */}
+          {form.nominal && Number(form.nominal) > 0 && (() => {
+            const nominal = Number(form.nominal);
+            const sisa    = nominal - tarif;
+            if (nominal < tarif) return (
+              <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-xs text-rose-700">
+                ⚠️ Nominal kurang dari tarif IPL ({fmt(tarif)}). Kekurangan: <strong>{fmt(tarif - nominal)}</strong>
+              </div>
+            );
+            if (nominal === tarif) return (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs text-emerald-700">
+                ✅ Nominal pas dengan tarif IPL. Tidak ada deposit.
+              </div>
+            );
+            return (
+              <div className="bg-teal-50 border border-teal-200 rounded-xl p-3 text-xs text-teal-700 space-y-1">
+                <p>✅ Tagihan IPL: <strong>{fmt(tarif)}</strong></p>
+                <p>💎 Sisa → otomatis jadi deposit: <strong>{fmt(sisa)}</strong></p>
+              </div>
+            );
+          })()}
+          <div>
+            <label className="block text-sm font-semibold text-slate-600 mb-1">Link ke Mutasi (Opsional)</label>
+            <SearchSelect
+              placeholder="Cari pengirim atau nominal..."
+              value={form.mutasiId}
+              onChange={v => setForm(f => ({...f, mutasiId: v}))}
+              options={[{ value: "", label: "— Tidak ada —" }, ...unmatchedMutasi.map(m => ({
+                value: m.id, label: `${m.pengirim} · ${fmtDate(m.tanggal)} · ${fmt(m.nominal)}`
+              }))]}
+              renderOption={o => o.label}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-slate-600 mb-1">Catatan</label>
+            <input type="text" placeholder="Contoh: Bayar tunai ke ketua RT" value={form.catatan}
+              onChange={e => setForm(f => ({...f, catatan: e.target.value}))}
+              className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+          </div>
+          <button onClick={handleSimpanSingle}
+            disabled={saving || !form.id_warga || !form.id_tagihan || !form.nominal}
+            className="w-full bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white font-semibold py-3 rounded-xl">
+            {saving ? "⏳ Menyimpan..." : "✅ Catat & Approve Pembayaran"}
+          </button>
+        </div>
+      )}
+
+      {/* ── BULK MODE ── */}
+      {mode === "bulk" && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-700">
+            Tarif IPL per unit: <strong>{fmt(tarif)}</strong> — sistem akan auto-hitung berapa unit bisa dibayar
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-slate-600 mb-1">Total Nominal Diterima</label>
+            <input type="number" placeholder={`Contoh: ${tarif * 3} (untuk 3 unit)`}
+              value={nominalBulk}
+              onChange={e => { setNominalBulk(e.target.value); setSelectedUnits([]); }}
+              className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+            {nominalBulk && Number(nominalBulk) > 0 && (
+              <div className={`mt-2 rounded-xl p-3 text-xs space-y-1 border ${
+                jumlahUnit === 0
+                  ? "bg-rose-50 border-rose-200 text-rose-700"
+                  : "bg-teal-50 border-teal-200 text-teal-700"
+              }`}>
+                {jumlahUnit === 0
+                  ? <p>⚠️ Nominal terlalu kecil, minimal {fmt(tarif)} untuk 1 unit</p>
+                  : <>
+                      <p>✅ Bisa bayar: <strong>{jumlahUnit} unit</strong> × {fmt(tarif)} = {fmt(jumlahUnit * tarif)}</p>
+                      {sisaBulk > 0
+                        ? <p>💎 Sisa <strong>{fmt(sisaBulk)}</strong> → otomatis jadi deposit</p>
+                        : <p>📌 Tidak ada sisa deposit</p>
+                      }
+                      <p className="text-slate-500 mt-0.5">Pilih tepat {jumlahUnit} unit di bawah</p>
+                    </>
+                }
+              </div>
+            )}
+          </div>
+
+          {jumlahUnit > 0 && (
+            <div>
+              <label className="block text-sm font-semibold text-slate-600 mb-2">
+                Pilih Unit ({selectedUnits.length}/{jumlahUnit} dipilih)
+              </label>
+              <SearchList
+                placeholder="Cari nama atau blok..."
+                items={allTagihanBelumLunas.map(t => {
+                  const w = warga.find(w => w.id === t.wargaId);
+                  return { key: `${t.wargaId}__${t.id}`, id_warga: t.wargaId, id_tagihan: t.id, w, t };
+                })}
+                selectedKeys={selectedUnits.map(u => u.key)}
+                onToggle={item => toggleUnit(item.id_warga, item.id_tagihan)}
+                maxSelect={jumlahUnit}
+                renderItem={item => `${item.w?.blok}${item.w?.nomor} · ${item.w?.nama} · ${fmt(tarif)}`}
+              />
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-semibold text-slate-600 mb-1">Link ke Mutasi (Opsional)</label>
+            <SearchSelect
+              placeholder="Cari pengirim atau nominal..."
+              value={mutasiIdBulk}
+              onChange={setMutasiIdBulk}
+              options={[{ value: "", label: "— Tidak ada —" }, ...unmatchedMutasi.map(m => ({
+                value: m.id, label: `${m.pengirim} · ${fmtDate(m.tanggal)} · ${fmt(m.nominal)}`
+              }))]}
+              renderOption={o => o.label}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-slate-600 mb-1">Catatan</label>
+            <input type="text" placeholder="Catatan opsional" value={catatanBulk}
+              onChange={e => setCatatanBulk(e.target.value)}
+              className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+          </div>
+
+          <button onClick={handleSimpanBulk}
+            disabled={saving || selectedUnits.length === 0 || !nominalBulk}
+            className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold py-3 rounded-xl">
+            {saving ? "⏳ Menyimpan..." : `✅ Catat ${selectedUnits.length} Pembayaran (Langsung Approved)`}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
