@@ -1956,227 +1956,308 @@ function AdminLaporan({ state }) {
 // ─── PUBLIC: LAPORAN KAS (tanpa login) ───────────────────────────────────────
 function PublicKas({ state }) {
   const { kas, kasRingkasan, periode, tagihan, pembayaran, warga, deposit, config } = state;
-  const tarif = Number(config.nominal_ipl) || 40000;
+  const tarif      = Number(config.nominal_ipl) || 40000;
+  const [tab, setTab] = useState("kas");
+  const [filterTipe, setFilterTipe] = useState("SEMUA");
+  const [filterWarga, setFilterWarga] = useState("SEMUA");
+  const [searchWarga, setSearchWarga] = useState("");
 
-  // Saldo deposit total
-  const totalDeposit = (deposit || []).reduce((s, d) =>
-    d.tipe === "MASUK" ? s + d.nominal : s - d.nominal, 0);
-  const saldoReal = (kasRingkasan.saldo || 0) - totalDeposit;
+  const KATEGORI_STYLE = {
+    Kebersihan:   { bg:"bg-emerald-100", text:"text-emerald-700", icon:"🌿" },
+    Peralatan:    { bg:"bg-blue-100",    text:"text-blue-700",    icon:"🔧" },
+    Perbaikan:    { bg:"bg-orange-100",  text:"text-orange-700",  icon:"🔨" },
+    IPL:          { bg:"bg-teal-100",    text:"text-teal-700",    icon:"🏘" },
+    Administrasi: { bg:"bg-purple-100",  text:"text-purple-700",  icon:"📋" },
+    Lainnya:      { bg:"bg-slate-100",   text:"text-slate-700",   icon:"📦" },
+  };
 
-  // Status warga per periode aktif
-  const periodeAktif = periode.find(p => p.status === "AKTIF");
-  const thisMonth    = periodeAktif?.bulan || "";
-  const tagihanAktif = tagihan.filter(t => t.idPeriode === periodeAktif?.id);
-  const sudahLunas   = tagihanAktif.filter(t => t.statusBayar === "LUNAS").length;
-  const belumBayar   = tagihanAktif.filter(t => t.statusBayar === "PENDING").length;
-  const tunggakan    = tagihan.filter(t => t.statusBayar === "TUNGGAK").length;
+  // Kalkulasi kas
+  const totalDeposit  = (deposit||[]).reduce((s,d) => d.tipe==="MASUK" ? s+d.nominal : s-d.nominal, 0);
+  const saldoReal     = (kasRingkasan.saldo||0) - totalDeposit;
+  const filteredKas   = filterTipe==="SEMUA" ? kas : kas.filter(k => k.tipe===filterTipe);
 
   // Pengeluaran per kategori
-  const pengeluaran     = kas.filter(k => k.tipe === "KELUAR");
-  const kategoriSummary = {};
-  pengeluaran.forEach(k => {
-    if (!kategoriSummary[k.kategori]) kategoriSummary[k.kategori] = 0;
-    kategoriSummary[k.kategori] += k.nominal;
+  const pengeluaran    = kas.filter(k => k.tipe==="KELUAR");
+  const kategoriMap    = {};
+  pengeluaran.forEach(k => { kategoriMap[k.kategori] = (kategoriMap[k.kategori]||0) + k.nominal; });
+
+  // Status warga
+  const periodeAktif  = periode.find(p => p.status==="AKTIF");
+  const tagihanAktif  = tagihan.filter(t => t.idPeriode === periodeAktif?.id);
+  const sudahLunasIds = new Set(tagihanAktif.filter(t => t.statusBayar==="LUNAS").map(t => t.wargaId));
+  const tunggakanIds  = new Set(tagihan.filter(t => t.statusBayar==="TUNGGAK").map(t => t.wargaId));
+
+  const filteredWarga = warga.filter(w => {
+    const srOk = !searchWarga || w.nama.toLowerCase().includes(searchWarga.toLowerCase()) || `${w.blok}${w.nomor}`.toLowerCase().includes(searchWarga.toLowerCase());
+    const stOk = filterWarga==="SEMUA" ? true
+      : filterWarga==="LUNAS"   ? sudahLunasIds.has(w.id)
+      : filterWarga==="BELUM"   ? (!sudahLunasIds.has(w.id) && !tunggakanIds.has(w.id))
+      : tunggakanIds.has(w.id);
+    return srOk && stOk;
   });
 
-  const KATEGORI_ICON = { IPL:"🏘", Kebersihan:"🌿", Peralatan:"🔧", Perbaikan:"🔨", Administrasi:"📋", Lainnya:"📦" };
+  const lunas   = warga.filter(w => sudahLunasIds.has(w.id)).length;
+  const tunggak = warga.filter(w => tunggakanIds.has(w.id)).length;
+  const belum   = warga.length - lunas - tunggak;
+  const pct     = warga.length > 0 ? Math.round((lunas/warga.length)*100) : 0;
 
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Header */}
-      <div className="bg-gradient-to-br from-teal-600 to-cyan-700 text-white">
-        <div className="max-w-2xl mx-auto px-4 py-8 text-center">
-          <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-4">🏘</div>
-          <h1 className="text-2xl font-bold">{config.nama_perumahan || "Mandalika Residence"}</h1>
-          <p className="text-teal-100 text-sm mt-1">Laporan Kas & Keuangan — Publik</p>
-          <p className="text-teal-200 text-xs mt-1">Diperbarui: {new Date().toLocaleDateString("id-ID", { day:"2-digit", month:"long", year:"numeric" })}</p>
+      <div className="bg-gradient-to-br from-teal-600 to-cyan-700 text-white sticky top-0 z-20 shadow-lg">
+        <div className="max-w-2xl mx-auto px-4 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center text-xl">🏘</div>
+            <div>
+              <p className="font-bold text-sm leading-tight">{config.nama_perumahan || "Mandalika Residence"}</p>
+              <p className="text-teal-100 text-xs">Laporan Kas · Publik</p>
+            </div>
+          </div>
+          <div className="text-right text-xs text-teal-100">
+            <p>Saldo Kas</p>
+            <p className="text-white font-bold text-base">{fmt(saldoReal)}</p>
+          </div>
+        </div>
+
+        {/* Quick bar */}
+        <div className="max-w-2xl mx-auto px-4 pb-4 grid grid-cols-4 gap-2">
+          {[
+            { label:"Lunas",   value:lunas,                              color:"text-emerald-200" },
+            { label:"Belum",   value:belum,                              color:"text-amber-200"   },
+            { label:"Tunggak", value:tunggak,                            color:"text-rose-200"    },
+            { label:"Target",  value:fmt(warga.length*tarif).replace("Rp",""), color:"text-white" },
+          ].map(s => (
+            <div key={s.label} className="bg-white/10 rounded-xl p-2 text-center">
+              <p className={`text-base font-bold ${s.color}`}>{s.value}</p>
+              <p className="text-teal-200 text-xs">{s.label}</p>
+            </div>
+          ))}
         </div>
       </div>
 
-      <div className="max-w-2xl mx-auto px-4 py-6 space-y-5">
+      <div className="max-w-2xl mx-auto px-4 py-4 space-y-4">
+        {/* Progress */}
+        {periodeAktif && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+            <div className="flex justify-between items-center mb-2">
+              <p className="text-sm font-bold text-slate-700">📊 {periodeAktif.bulan}</p>
+              <p className="text-lg font-bold text-teal-600">{pct}%</p>
+            </div>
+            <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
+              <div className="bg-gradient-to-r from-teal-500 to-cyan-400 h-full rounded-full transition-all" style={{width:`${pct}%`}} />
+            </div>
+            <div className="flex justify-between mt-1.5 text-xs text-slate-400">
+              <span>{fmt(lunas*tarif)} terkumpul</span>
+              <span>Target {fmt(warga.length*tarif)}</span>
+            </div>
+          </div>
+        )}
 
-        {/* Saldo Kas */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="bg-teal-50 border-b border-teal-100 px-5 py-3">
-            <h2 className="font-bold text-teal-800">💰 Saldo Kas</h2>
-          </div>
-          <div className="p-5 grid grid-cols-3 gap-4 text-center">
-            <div>
-              <p className="text-xs text-slate-400 uppercase font-semibold mb-1">Total Masuk</p>
-              <p className="text-lg font-bold text-emerald-600">{fmt(kasRingkasan.masuk || 0)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-slate-400 uppercase font-semibold mb-1">Total Keluar</p>
-              <p className="text-lg font-bold text-rose-600">{fmt(kasRingkasan.keluar || 0)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-slate-400 uppercase font-semibold mb-1">Saldo Real</p>
-              <p className="text-lg font-bold text-teal-700">{fmt(saldoReal)}</p>
-            </div>
-          </div>
-          {totalDeposit > 0 && (
-            <div className="px-5 pb-4">
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-700 text-center">
-                💎 Termasuk deposit warga <strong>{fmt(totalDeposit)}</strong> yang belum dipakai
-              </div>
-            </div>
-          )}
+        {/* Tabs */}
+        <div className="flex gap-1.5 bg-slate-100 p-1 rounded-xl">
+          {[["kas","💰 Kas"],["warga","👥 Status Warga"],["periode","📅 Periode"]].map(([id,label]) => (
+            <button key={id} onClick={() => setTab(id)}
+              className={`flex-1 py-2 rounded-lg text-xs font-semibold transition-all ${tab===id ? "bg-white shadow text-teal-700" : "text-slate-500 hover:text-slate-700"}`}>
+              {label}
+            </button>
+          ))}
         </div>
 
-        {/* Progress IPL bulan ini */}
-        {periodeAktif && (
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="bg-emerald-50 border-b border-emerald-100 px-5 py-3">
-              <h2 className="font-bold text-emerald-800">📊 Koleksi IPL — {thisMonth}</h2>
+        {/* ── TAB KAS ── */}
+        {tab === "kas" && (
+          <div className="space-y-4">
+            {/* Summary */}
+            <div className="grid grid-cols-3 gap-3">
+              {[
+                { label:"Total Masuk",  value:fmt(kasRingkasan.masuk||0),  color:"text-emerald-600", bg:"bg-emerald-50 border-emerald-100" },
+                { label:"Total Keluar", value:fmt(kasRingkasan.keluar||0), color:"text-rose-600",    bg:"bg-rose-50 border-rose-100"       },
+                { label:"Saldo Real",   value:fmt(saldoReal),              color:"text-teal-700",    bg:"bg-teal-50 border-teal-100"       },
+              ].map(s => (
+                <div key={s.label} className={`${s.bg} border rounded-xl p-3 text-center`}>
+                  <p className={`text-sm font-bold ${s.color} leading-tight`}>{s.value}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">{s.label}</p>
+                </div>
+              ))}
             </div>
-            <div className="p-5 space-y-4">
-              <div className="grid grid-cols-3 gap-3 text-center">
-                <div className="bg-emerald-50 rounded-xl p-3">
-                  <p className="text-2xl font-bold text-emerald-600">{sudahLunas}</p>
-                  <p className="text-xs text-slate-500 mt-0.5">Lunas</p>
-                </div>
-                <div className="bg-amber-50 rounded-xl p-3">
-                  <p className="text-2xl font-bold text-amber-600">{belumBayar}</p>
-                  <p className="text-xs text-slate-500 mt-0.5">Belum Bayar</p>
-                </div>
-                <div className="bg-rose-50 rounded-xl p-3">
-                  <p className="text-2xl font-bold text-rose-600">{tunggakan}</p>
-                  <p className="text-xs text-slate-500 mt-0.5">Tunggakan</p>
+
+            {/* Pengeluaran per kategori */}
+            {Object.keys(kategoriMap).length > 0 && (
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+                <p className="text-sm font-bold text-slate-700 mb-3">Pengeluaran per Kategori</p>
+                <div className="space-y-2.5">
+                  {Object.entries(kategoriMap).sort((a,b)=>b[1]-a[1]).map(([kat, total]) => {
+                    const s = KATEGORI_STYLE[kat] || KATEGORI_STYLE.Lainnya;
+                    const pctKat = Math.round((total/(kasRingkasan.keluar||1))*100);
+                    return (
+                      <div key={kat} className="flex items-center gap-3">
+                        <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-base flex-shrink-0 ${s.bg}`}>{s.icon}</span>
+                        <div className="flex-1">
+                          <div className="flex justify-between text-xs mb-1">
+                            <span className="font-medium text-slate-700">{kat}</span>
+                            <span className="font-bold text-slate-700">{fmt(total)} <span className="text-slate-400 font-normal">({pctKat}%)</span></span>
+                          </div>
+                          <div className="w-full bg-slate-100 rounded-full h-1.5">
+                            <div className={`h-full rounded-full ${s.bg.replace("bg-","bg-").replace("-100","-400")}`} style={{width:`${pctKat}%`}} />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
-              {tagihanAktif.length > 0 && (
-                <>
-                  <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
-                    <div className="bg-gradient-to-r from-emerald-500 to-teal-400 h-full rounded-full transition-all"
-                      style={{width:`${Math.round((sudahLunas/tagihanAktif.length)*100)}%`}} />
-                  </div>
-                  <div className="flex justify-between text-xs text-slate-400">
-                    <span>{fmt(sudahLunas * tarif)} terkumpul</span>
-                    <span>{Math.round((sudahLunas/tagihanAktif.length)*100)}% dari target {fmt(tagihanAktif.length * tarif)}</span>
-                  </div>
-                </>
-              )}
+            )}
+
+            {/* Riwayat transaksi */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+                <p className="text-sm font-bold text-slate-700">Riwayat Transaksi</p>
+                <div className="flex gap-1">
+                  {["SEMUA","MASUK","KELUAR"].map(t => (
+                    <button key={t} onClick={() => setFilterTipe(t)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${filterTipe===t ? "bg-teal-600 text-white" : "bg-slate-100 text-slate-500"}`}>
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="divide-y divide-slate-50 max-h-72 overflow-y-auto">
+                {filteredKas.length === 0
+                  ? <p className="text-center py-6 text-slate-400 text-sm">Tidak ada data</p>
+                  : [...filteredKas].sort((a,b) => new Date(b.tanggal)-new Date(a.tanggal)).map(k => {
+                    const s = KATEGORI_STYLE[k.kategori] || KATEGORI_STYLE.Lainnya;
+                    return (
+                      <div key={k.id} className="px-4 py-3 flex items-center gap-3">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm flex-shrink-0 ${s.bg}`}>{s.icon}</div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-slate-700 truncate">{k.keterangan}</p>
+                          <p className="text-xs text-slate-400">{fmtDate(k.tanggal)} · {k.kategori}</p>
+                        </div>
+                        <p className={`text-sm font-bold flex-shrink-0 ${k.tipe==="MASUK"?"text-emerald-600":"text-rose-500"}`}>
+                          {k.tipe==="MASUK"?"+":"-"}{fmt(k.nominal)}
+                        </p>
+                      </div>
+                    );
+                  })
+                }
+              </div>
             </div>
           </div>
         )}
 
-        {/* Siapa yang belum bayar */}
-        {(belumBayar > 0 || tunggakan > 0) && (
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="bg-rose-50 border-b border-rose-100 px-5 py-3">
-              <h2 className="font-bold text-rose-800">⏳ Belum Bayar & Tunggakan</h2>
+        {/* ── TAB STATUS WARGA ── */}
+        {tab === "warga" && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-3 gap-3">
+              {[
+                { label:"Lunas",   value:lunas,   color:"text-emerald-600", bg:"bg-emerald-50 border-emerald-100" },
+                { label:"Belum",   value:belum,   color:"text-amber-600",   bg:"bg-amber-50 border-amber-100"     },
+                { label:"Tunggak", value:tunggak, color:"text-rose-600",    bg:"bg-rose-50 border-rose-100"       },
+              ].map(s => (
+                <div key={s.label} className={`${s.bg} border rounded-xl p-3 text-center`}>
+                  <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">{s.label}</p>
+                </div>
+              ))}
             </div>
-            <div className="divide-y divide-slate-50 max-h-64 overflow-y-auto">
-              {[...tagihanAktif.filter(t => t.statusBayar !== "LUNAS"),
-                ...tagihan.filter(t => t.statusBayar === "TUNGGAK" && t.idPeriode !== periodeAktif?.id)
-              ].map(t => {
-                const w = warga.find(w => w.id === t.wargaId);
-                return (
-                  <div key={t.id} className="px-5 py-3 flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-slate-700">{w?.nama || "—"}</p>
-                      <p className="text-xs text-slate-400">{w?.blok}{w?.nomor} · {t.bulan}</p>
-                    </div>
-                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                      t.statusBayar === "TUNGGAK"
-                        ? "bg-red-100 text-red-700"
-                        : "bg-amber-100 text-amber-700"
-                    }`}>
-                      {t.statusBayar === "TUNGGAK" ? "⚠️ Tunggak" : "⏳ Belum"}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
 
-        {/* Riwayat periode */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="bg-slate-50 border-b border-slate-100 px-5 py-3">
-            <h2 className="font-bold text-slate-700">📅 Riwayat Periode</h2>
-          </div>
-          <div className="divide-y divide-slate-50">
-            {periode.length === 0
-              ? <p className="text-center py-6 text-slate-400 text-sm">Belum ada data</p>
-              : [...periode].reverse().map(p => {
-                const tP     = tagihan.filter(t => t.idPeriode === p.id);
-                const lunas  = tP.filter(t => t.statusBayar === "LUNAS").length;
-                const tnggk  = tP.filter(t => t.statusBayar === "TUNGGAK").length;
-                return (
-                  <div key={p.id} className="px-5 py-4 flex items-center gap-3">
-                    <div className={`w-2 h-10 rounded-full flex-shrink-0 ${p.status === "AKTIF" ? "bg-emerald-500" : "bg-slate-300"}`} />
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <p className="font-semibold text-slate-700 text-sm">{p.bulan}</p>
-                        <span className={`text-xs px-1.5 py-0.5 rounded font-semibold ${p.status === "AKTIF" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
-                          {p.status}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 space-y-3">
+              <div className="flex gap-1.5 flex-wrap">
+                {[["SEMUA","Semua"],["LUNAS","✅ Lunas"],["BELUM","⏳ Belum"],["TUNGGAK","⚠️ Tunggak"]].map(([val,label]) => (
+                  <button key={val} onClick={() => setFilterWarga(val)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${filterWarga===val ? "bg-teal-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <input type="text" placeholder="Cari nama atau blok..." value={searchWarga}
+                onChange={e => setSearchWarga(e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50 grid grid-cols-12 text-xs font-semibold text-slate-400 uppercase">
+                <span className="col-span-2">Blok</span>
+                <span className="col-span-6">Nama</span>
+                <span className="col-span-4 text-right">Status</span>
+              </div>
+              <div className="divide-y divide-slate-50 max-h-80 overflow-y-auto">
+                {filteredWarga.length === 0
+                  ? <p className="text-center py-6 text-slate-400 text-sm">Tidak ada data</p>
+                  : filteredWarga.map(w => {
+                    const isLunas   = sudahLunasIds.has(w.id);
+                    const isTunggak = tunggakanIds.has(w.id);
+                    return (
+                      <div key={w.id} className={`px-4 py-2.5 grid grid-cols-12 items-center ${isTunggak?"bg-rose-50/30":""}`}>
+                        <span className="col-span-2 text-sm font-bold text-slate-600">{w.blok}{w.nomor}</span>
+                        <span className="col-span-6 text-sm text-slate-700 truncate pr-2">{w.nama}</span>
+                        <span className="col-span-4 text-right">
+                          {isLunas
+                            ? <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-semibold">✓ Lunas</span>
+                            : isTunggak
+                              ? <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-semibold">⚠️ Tunggak</span>
+                              : <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold">⏳ Belum</span>
+                          }
                         </span>
                       </div>
-                      <p className="text-xs text-slate-400 mt-0.5">
-                        ✅ {lunas} lunas{tnggk > 0 ? ` · ⚠️ ${tnggk} tunggak` : ""}
-                      </p>
+                    );
+                  })
+                }
+              </div>
+              <div className="px-4 py-2.5 border-t border-slate-100 bg-slate-50 flex justify-between text-xs">
+                <span className="text-slate-400">{filteredWarga.length} dari {warga.length} warga</span>
+                <span className="font-semibold text-teal-600">{fmt(lunas*tarif)} / {fmt(warga.length*tarif)}</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── TAB PERIODE ── */}
+        {tab === "periode" && (
+          <div className="space-y-3">
+            {periode.length === 0
+              ? <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-slate-400">Belum ada data periode</div>
+              : [...periode].reverse().map(p => {
+                const tP    = tagihan.filter(t => t.idPeriode === p.id);
+                const lns   = tP.filter(t => t.statusBayar==="LUNAS").length;
+                const tnk   = tP.filter(t => t.statusBayar==="TUNGGAK").length;
+                const pctP  = tP.length > 0 ? Math.round((lns/tP.length)*100) : 0;
+                return (
+                  <div key={p.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <div className={`w-2 h-8 rounded-full ${p.status==="AKTIF"?"bg-emerald-500":"bg-slate-300"}`} />
+                        <div>
+                          <p className="font-bold text-slate-700">{p.bulan}</p>
+                          <span className={`text-xs px-1.5 py-0.5 rounded font-semibold ${p.status==="AKTIF"?"bg-emerald-100 text-emerald-700":"bg-slate-100 text-slate-500"}`}>
+                            {p.status}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-bold text-teal-600">{fmt(p.totalTerkumpul||0)}</p>
+                        <p className="text-xs text-slate-400">terkumpul</p>
+                      </div>
                     </div>
-                    <p className="font-bold text-teal-600 text-sm">{fmt(p.totalTerkumpul || 0)}</p>
+                    {tP.length > 0 && (
+                      <>
+                        <div className="w-full bg-slate-100 rounded-full h-2 mb-2">
+                          <div className={`h-full rounded-full ${p.status==="AKTIF"?"bg-teal-500":"bg-slate-400"}`} style={{width:`${pctP}%`}} />
+                        </div>
+                        <div className="flex justify-between text-xs text-slate-400">
+                          <span>✅ {lns} lunas · {pctP}%{tnk>0 ? ` · ⚠️ ${tnk} tunggak`:""}</span>
+                          {p.tglTutup && <span>Ditutup: {p.tglTutup}</span>}
+                        </div>
+                      </>
+                    )}
                   </div>
                 );
               })
             }
           </div>
-        </div>
+        )}
 
-        {/* Pengeluaran per kategori */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="bg-slate-50 border-b border-slate-100 px-5 py-3">
-            <h2 className="font-bold text-slate-700">📤 Pengeluaran per Kategori</h2>
-          </div>
-          <div className="p-5 space-y-3">
-            {Object.entries(kategoriSummary).sort((a,b) => b[1]-a[1]).map(([kat, total]) => (
-              <div key={kat} className="flex items-center gap-3">
-                <span className="text-xl">{KATEGORI_ICON[kat] || "📦"}</span>
-                <div className="flex-1">
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="font-medium text-slate-700">{kat}</span>
-                    <span className="font-bold text-slate-700">{fmt(total)}</span>
-                  </div>
-                  <div className="w-full bg-slate-100 rounded-full h-1.5">
-                    <div className="bg-rose-400 h-full rounded-full"
-                      style={{width:`${Math.round((total/(kasRingkasan.keluar||1))*100)}%`}} />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Riwayat transaksi kas */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="bg-slate-50 border-b border-slate-100 px-5 py-3">
-            <h2 className="font-bold text-slate-700">📋 Riwayat Transaksi</h2>
-          </div>
-          <div className="divide-y divide-slate-50">
-            {kas.length === 0
-              ? <p className="text-center py-6 text-slate-400 text-sm">Belum ada transaksi</p>
-              : [...kas].sort((a,b) => new Date(b.tanggal)-new Date(a.tanggal)).map(k => (
-                <div key={k.id} className="px-5 py-3.5 flex items-center gap-3">
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm flex-shrink-0 ${k.tipe==="MASUK"?"bg-emerald-100":"bg-rose-100"}`}>
-                    {KATEGORI_ICON[k.kategori] || "📦"}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-slate-700 truncate">{k.keterangan}</p>
-                    <p className="text-xs text-slate-400">{fmtDate(k.tanggal)} · {k.kategori}</p>
-                  </div>
-                  <p className={`text-sm font-bold flex-shrink-0 ${k.tipe==="MASUK"?"text-emerald-600":"text-rose-500"}`}>
-                    {k.tipe==="MASUK"?"+":"-"}{fmt(k.nominal)}
-                  </p>
-                </div>
-              ))
-            }
-          </div>
-        </div>
-
-        <p className="text-center text-xs text-slate-400 pb-4">
-          {config.nama_perumahan} · Data diperbarui real-time
+        <p className="text-center text-xs text-slate-400 pb-6">
+          {config.nama_perumahan} · Data real-time · Diperbarui otomatis
         </p>
       </div>
     </div>
